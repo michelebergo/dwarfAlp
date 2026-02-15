@@ -1,0 +1,22 @@
+# Remote observatory profile – optimised for Internet access via VPN/tunnel.
+# Usage: dwarf-alpaca serve --config profiles/remote.yaml
+#
+# IMPORTANT: change api_key to a strong secret before deploying!
+
+latency_profile: "remote"
+
+# Authentication – set a strong key; clients must send X-API-Key header.
+api_key: "CHANGE_ME"
+
+# TLS – generate certificates first:  dwarf-alpaca generate-cert
+enable_https: true
+tls_certfile: "var/tls/cert.pem"
+tls_keyfile: "var/tls/key.pem"
+
+# Disable UDP discovery (not useful over Internet)
+discovery_enabled: false
+
+# Reconnection – more aggressive for unstable links
+ws_reconnect_enabled: true
+ws_reconnect_max_retries: 20
+ws_reconnect_max_delay: 60.0

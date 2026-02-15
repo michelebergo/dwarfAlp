@@ -1,0 +1,25 @@
+[Unit]
+Description=DwarfAlp – DWARF 3 Alpaca Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dwarfAlp
+Group=dwarfAlp
+WorkingDirectory=/opt/dwarfAlp
+ExecStart=/opt/dwarfAlp/.venv/bin/dwarf-alpaca start --skip-provision --config /opt/dwarfAlp/config/pi-remote.yaml
+Restart=on-failure
+RestartSec=10
+
+# Environment
+Environment=DWARF_ALPACA_NETWORK_MODE=sta
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/dwarfAlp/var
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+# DwarfAlp – Raspberry Pi Zero W remote deployment profile
+#
+# Optimised for: Pi Zero W + DWARF 3 STA mode + Tailscale
+# Usage: dwarf-alpaca start --skip-provision --config profiles/pi-remote.yaml
+
+latency_profile: "remote"
+
+# Authentication – CHANGE THIS before deploying!
+api_key: "CHANGE_ME_TO_A_STRONG_SECRET"
+
+# TLS (generate certs first: dwarf-alpaca generate-cert)
+enable_https: true
+tls_certfile: "var/tls/cert.pem"
+tls_keyfile: "var/tls/key.pem"
+
+# Discovery – disabled over VPN/tunnel
+discovery_enabled: false
+
+# Network – DWARF 3 must be in STA mode on the same network
+network_mode: "sta"
+
+# Reconnection – aggressive for mobile/unstable links
+ws_reconnect_enabled: true
+ws_reconnect_max_retries: 30
+ws_reconnect_base_delay: 2.0
+ws_reconnect_max_delay: 60.0
+
+# Pi Zero W has limited RAM – disable RTSP preview to save memory
+go_live_before_exposure: false

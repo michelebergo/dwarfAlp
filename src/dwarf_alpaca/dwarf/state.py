@@ -14,6 +14,9 @@ class ConnectivityState:
     wifi_credentials: dict[str, str] = field(default_factory=dict)
     last_device_address: Optional[str] = None
     timezone_name: Optional[str] = None
+    site_latitude: Optional[float] = None
+    site_longitude: Optional[float] = None
+    site_elevation: Optional[float] = None
 
 
 @dataclass
@@ -61,6 +64,13 @@ class StateStore:
         if not isinstance(data.get("last_device_address"), str):
             data["last_device_address"] = None
 
+        for coord_key in ("site_latitude", "site_longitude", "site_elevation"):
+            raw = data.get(coord_key)
+            if isinstance(raw, (int, float)):
+                data[coord_key] = float(raw)
+            else:
+                data.setdefault(coord_key, None)
+
         self.state = ConnectivityState(**data)
         return self.state
 
@@ -81,6 +91,9 @@ class StateStore:
                 if isinstance(state.timezone_name, str) and state.timezone_name.strip()
                 else None
             ),
+            site_latitude=float(state.site_latitude) if isinstance(state.site_latitude, (int, float)) else None,
+            site_longitude=float(state.site_longitude) if isinstance(state.site_longitude, (int, float)) else None,
+            site_elevation=float(state.site_elevation) if isinstance(state.site_elevation, (int, float)) else None,
         )
         with self.path.open("w", encoding="utf-8") as stream:
             json.dump(sanitized.__dict__, stream, indent=2)

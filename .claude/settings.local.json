@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest:*)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -x -q)",
+      "Bash(python:*)"
+    ]
+  }
+}

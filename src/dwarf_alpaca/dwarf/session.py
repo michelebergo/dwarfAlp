@@ -144,6 +144,10 @@ class DwarfSession:
             minor_version=2,
             client_id=settings.dwarf_ws_client_id,
             ping_interval=settings.ws_ping_interval_seconds,
+            reconnect_enabled=settings.ws_reconnect_enabled,
+            reconnect_max_retries=settings.ws_reconnect_max_retries,
+            reconnect_base_delay=settings.ws_reconnect_base_delay,
+            reconnect_max_delay=settings.ws_reconnect_max_delay,
         )
         self._focus_update_event = asyncio.Event()
         self._ws_client.register_notification_handler(self._handle_notification)
@@ -231,6 +235,17 @@ class DwarfSession:
         if self.simulation:
             return
         was_connected = self._ws_client.connected
+
+        # If a reconnect is already in progress, wait for it instead of failing immediately.
+        if not was_connected and self._ws_client._reconnect_task and not self._ws_client._reconnect_task.done():
+            logger.info("dwarf.ws.waiting_for_reconnect")
+            reconnected = await self._ws_client.wait_reconnected(
+                timeout=self._ws_client._reconnect_max_delay * 2,
+            )
+            if not reconnected:
+                raise RuntimeError("WebSocket reconnection timed out")
+            was_connected = False  # force re-bootstrap below
+
         try:
             await self._ws_client.connect()
         except Exception as exc:  # pragma: no cover - hardware dependent

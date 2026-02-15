@@ -13,6 +13,7 @@ from starlette.requests import Request
 
 from .config.settings import Settings
 from .discovery import DiscoveryService
+from .middleware.auth import ApiKeyMiddleware
 from .management.router import router as management_router
 from .devices.telescope import router as telescope_router
 from .devices.camera import router as camera_router
@@ -75,6 +76,8 @@ def build_app(settings: Settings) -> FastAPI:
     app.include_router(focuser_router, prefix="/api/v1/focuser/0")
     app.include_router(filterwheel_router, prefix="/api/v1/filterwheel/0")
     app.add_middleware(AccessLogMiddleware)
+    if settings.api_key:
+        app.add_middleware(ApiKeyMiddleware, api_key=settings.api_key, header_name=settings.api_key_header)
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):

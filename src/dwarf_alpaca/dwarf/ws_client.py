@@ -47,6 +47,10 @@ class DwarfWsClient:
         device_id: int = 1,
         client_id: str | None = None,
         ping_interval: float | None = None,
+        reconnect_enabled: bool = False,
+        reconnect_max_retries: int = 10,
+        reconnect_base_delay: float = 1.0,
+        reconnect_max_delay: float = 30.0,
     ) -> None:
         self.uri = f"ws://{host}:{port}/"
         self.major_version = major_version
@@ -55,13 +59,21 @@ class DwarfWsClient:
         self._client_id = client_id or ""
         self._ping_interval = None if not ping_interval or ping_interval <= 0 else float(ping_interval)
 
+        self._reconnect_enabled = reconnect_enabled
+        self._reconnect_max_retries = reconnect_max_retries
+        self._reconnect_base_delay = reconnect_base_delay
+        self._reconnect_max_delay = reconnect_max_delay
+
         self._lock = asyncio.Lock()
         self._conn: Optional[websockets.WebSocketClientProtocol] = None
         self._reader_task: Optional[asyncio.Task[None]] = None
+        self._reconnect_task: Optional[asyncio.Task[None]] = None
+        self._closing = False
         self._pending: Dict[Tuple[int, int], _PendingRequest] = {}
         self._pending_aliases: Dict[Tuple[int, int], Tuple[int, int]] = {}
         self._notifications: set[NotificationHandler] = set()
         self._connected_event = asyncio.Event()
+        self._reconnected_event = asyncio.Event()
         self._ping_task: Optional[asyncio.Task[None]] = None
 
     def set_client_id(self, client_id: str | None) -> None:
@@ -108,7 +120,13 @@ class DwarfWsClient:
             self._start_ping_task()
 
     async def close(self) -> None:
+        self._closing = True
         async with self._lock:
+            if self._reconnect_task and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+                with contextlib.suppress(Exception):
+                    await self._reconnect_task
+                self._reconnect_task = None
             await self._stop_ping_task()
             if self._reader_task:
                 self._reader_task.cancel()
@@ -121,6 +139,7 @@ class DwarfWsClient:
                 self._conn = None
             self._connected_event.clear()
             self._flush_pending(ConnectionClosedOK(None, None))
+        self._closing = False
 
     async def wait_connected(self) -> None:
         await self._connected_event.wait()
@@ -259,6 +278,7 @@ class DwarfWsClient:
 
     async def _reader_loop(self) -> None:
         assert self._conn is not None
+        unexpected_disconnect = False
         try:
             async for payload in self._conn:
                 if isinstance(payload, str):
@@ -271,13 +291,65 @@ class DwarfWsClient:
                     logger.warning("dwarf.ws.packet.decode_failed", error=str(exc))
                     continue
                 await self._dispatch_packet(packet)
+            # Iterator exhausted = connection closed by remote
+            unexpected_disconnect = True
         except asyncio.CancelledError:
             pass
         except Exception as exc:
             self._flush_pending(exc)
+            unexpected_disconnect = True
         finally:
             self._connected_event.clear()
             self._conn = None
+            if unexpected_disconnect and self._reconnect_enabled and not self._closing:
+                logger.info("dwarf.ws.connection_lost", reconnect=True)
+                self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self) -> None:
+        """Attempt to re-establish the websocket with exponential backoff."""
+        delay = self._reconnect_base_delay
+        for attempt in range(1, self._reconnect_max_retries + 1):
+            if self._closing:
+                return
+            logger.info(
+                "dwarf.ws.reconnect_attempt",
+                attempt=attempt,
+                max_retries=self._reconnect_max_retries,
+                delay=delay,
+            )
+            await asyncio.sleep(delay)
+            if self._closing:
+                return
+            try:
+                async with self._lock:
+                    if self.connected:
+                        logger.info("dwarf.ws.reconnect_already_connected")
+                        self._reconnected_event.set()
+                        return
+                    self._conn = await websockets.connect(self.uri, ping_interval=None)
+                    self._connected_event.set()
+                    self._reader_task = asyncio.create_task(self._reader_loop())
+                    self._start_ping_task()
+                logger.info("dwarf.ws.reconnected", attempt=attempt)
+                self._reconnected_event.set()
+                return
+            except Exception as exc:
+                logger.warning("dwarf.ws.reconnect_failed", attempt=attempt, error=str(exc))
+                delay = min(delay * 2, self._reconnect_max_delay)
+
+        logger.error(
+            "dwarf.ws.reconnect_exhausted",
+            max_retries=self._reconnect_max_retries,
+        )
+
+    async def wait_reconnected(self, timeout: float | None = None) -> bool:
+        """Wait for a reconnection to complete. Returns True if reconnected."""
+        self._reconnected_event.clear()
+        try:
+            await asyncio.wait_for(self._reconnected_event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
 
     async def _dispatch_packet(self, packet: Message) -> None:
         packet_type = getattr(packet, "type", None)

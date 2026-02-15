@@ -27,11 +27,13 @@ dependencies = [
   "python-dotenv>=1.1.1",
   "python-multipart>=0.0.20",
   "protobuf>=3.20.3,<3.21",
-  "websockets>=15.0.1",
-  "PySide6>=6.10.0"
+  "websockets>=15.0.1"
 ]
 
 [project.optional-dependencies]
+gui = [
+  "PySide6>=6.10.0"
+]
 development = [
   "pytest>=8.4.2",
   "pytest-asyncio>=1.2.0",

@@ -1,0 +1,7 @@
+# Local network profile (default settings, no auth required)
+# Usage: dwarf-alpaca serve --config profiles/local.yaml
+
+latency_profile: "local"
+discovery_enabled: true
+ws_reconnect_enabled: true
+ws_reconnect_max_retries: 5

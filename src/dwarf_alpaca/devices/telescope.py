@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..dwarf.ws_client import DwarfCommandError
+from ..dwarf.state import StateStore, ConnectivityState
 from ..proto import protocol_pb2
 
 from ..dwarf.session import get_session
@@ -47,6 +48,25 @@ class TelescopeState:
 
 
 state = TelescopeState()
+
+
+def _load_site_coordinates(settings) -> None:
+    """Populate site coordinates from settings, falling back to persisted state."""
+    store = StateStore(path=settings.state_directory / "connectivity.json")
+    saved = store.load()
+    state.site_latitude = settings.site_latitude if settings.site_latitude is not None else (saved.site_latitude or 0.0)
+    state.site_longitude = settings.site_longitude if settings.site_longitude is not None else (saved.site_longitude or 0.0)
+    state.site_elevation = settings.site_elevation if settings.site_elevation is not None else (saved.site_elevation or 0.0)
+
+
+def _persist_site_coordinates(settings) -> None:
+    """Save current site coordinates to the connectivity state file."""
+    store = StateStore(path=settings.state_directory / "connectivity.json")
+    saved = store.load()
+    saved.site_latitude = state.site_latitude
+    saved.site_longitude = state.site_longitude
+    saved.site_elevation = state.site_elevation
+    store.save(saved)
 
 
 def _parse_float(value: str | float) -> float:
@@ -113,6 +133,7 @@ async def put_connected(
             await session.acquire("telescope")
             acquired = True
             state.using_simulation = session.is_simulated
+            _load_site_coordinates(session.settings)
         except DwarfCommandError as exc:
             if acquired:
                 with contextlib.suppress(Exception):
@@ -657,6 +678,8 @@ async def set_site_latitude(
         raise HTTPException(status_code=400, detail="Latitude out of range")
     state.site_latitude = value
     _update_alt_az()
+    session = await get_session()
+    _persist_site_coordinates(session.settings)
     return alpaca_response()
 
 
@@ -682,6 +705,8 @@ async def set_site_longitude(
         raise HTTPException(status_code=400, detail="Longitude out of range")
     state.site_longitude = value
     _update_alt_az()
+    session = await get_session()
+    _persist_site_coordinates(session.settings)
     return alpaca_response()
 
 
@@ -699,6 +724,8 @@ async def set_site_elevation(
     )
     value = _parse_float(raw)
     state.site_elevation = value
+    session = await get_session()
+    _persist_site_coordinates(session.settings)
     return alpaca_response()
 
 

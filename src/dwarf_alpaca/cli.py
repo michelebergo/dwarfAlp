@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import time
 from logging.handlers import RotatingFileHandler
@@ -184,6 +185,65 @@ async def start_command(
     await run_server(settings)
 
 
+def _generate_cert(*, out_dir: str, hostname: str) -> None:
+    """Generate a self-signed TLS certificate and private key."""
+    from pathlib import Path
+
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        import datetime as _dt
+    except ImportError:
+        raise SystemExit(
+            "The 'cryptography' package is required for certificate generation.\n"
+            "Install it with: pip install cryptography"
+        )
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(_dt.datetime.now(_dt.timezone.utc))
+        .not_valid_after(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=365))
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName(hostname),
+                x509.DNSName("localhost"),
+                x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+            ]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+
+    cert_path = out / "cert.pem"
+    key_path = out / "key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+    )
+    print(f"Certificate written to {cert_path}")
+    print(f"Private key written to {key_path}")
+    print()
+    print("To enable HTTPS, add to your .env or YAML config:")
+    print(f"  DWARF_ALPACA_ENABLE_HTTPS=true")
+    print(f"  DWARF_ALPACA_TLS_CERTFILE={cert_path}")
+    print(f"  DWARF_ALPACA_TLS_KEYFILE={key_path}")
+
+
 def main() -> None:
     """CLI entry point for running the Alpaca server or performing provisioning tasks."""
     import argparse
@@ -279,6 +339,23 @@ def main() -> None:
         help="Override the BLE password (defaults to DWARF_12345678 or settings value).",
     )
 
+    cert_parser = subparsers.add_parser(
+        "generate-cert",
+        help="Generate a self-signed TLS certificate for HTTPS.",
+    )
+    cert_parser.add_argument(
+        "--out-dir",
+        type=str,
+        default="var/tls",
+        help="Directory to write cert.pem and key.pem (default: var/tls).",
+    )
+    cert_parser.add_argument(
+        "--hostname",
+        type=str,
+        default="dwarf-alpaca",
+        help="Common Name / SAN hostname for the certificate.",
+    )
+
     guide_parser = subparsers.add_parser(
         "guide",
         help="Interactive BLE guide to discover DWARF devices and provision Wi-Fi.",
@@ -295,6 +372,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if args.command == "generate-cert":
+        _generate_cert(out_dir=args.out_dir, hostname=args.hostname)
+        return
 
     if args.command == "guide":
         settings = load_settings(config_path=None)
